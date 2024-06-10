@@ -8,6 +8,7 @@ import os
 from io import open
 
 from setuptools import setup
+from setuptools.command.install import install
 
 from pattern import __version__
 
@@ -48,6 +49,57 @@ if sys.argv[-1] == "zip":
 
 #---------------------------------------------------------------------------------------------------
 # "python setup.py install" will install /pattern in /site-packages.
+
+class PostInstall(install):
+    """Post-installation for installation mode."""
+    def run(self):
+        install.run(self)  # Run the standard installation first
+        self.modify_read_function()  # Run the post-installation task
+
+    def modify_read_function(self):
+        # Define the path to the __init__.py where _read function is defined
+        init_path = os.path.join(self.install_lib, 'pattern', 'text', '__init__.py')
+        
+        # The new _read function content
+        new_read_function = """def _read(path, encoding="utf-8", comment=";;;"):
+    \"\"\" Returns an iterator over the lines in the file at the given path,
+        stripping comments and decoding each line to Unicode.
+    \"\"\" 
+    if path:
+        if isinstance(path, str) and os.path.exists(path):
+            # From file path.
+            f = open(path, "r", encoding="utf-8")
+        elif isinstance(path, str):
+            # From string.
+            f = path.splitlines()
+        else:
+            # From file or buffer.
+            f = path
+        
+        for i, line in enumerate(f):
+            line = line.strip(BOM_UTF8) if i == 0 and isinstance(line, str) else line
+            line = line.strip()
+            line = decode_utf8(line, encoding)
+            if not line or (comment and line.startswith(comment)):
+                continue
+            yield line
+
+        if isinstance(path, str) and os.path.exists(path):
+            f.close()
+"""
+
+        # Read and modify the content of __init__.py
+        try:
+            with open(init_path, 'r+', encoding='utf-8') as file:
+                content = file.read()
+                # Replace the existing _read function with the new content
+                content = re.sub(r'def _read\(.*?\):.*?^\)', new_read_function, content, flags=re.DOTALL | re.MULTILINE)
+                # Go to the beginning of the file to overwrite
+                file.seek(0)
+                file.write(content)
+                file.truncate()  # Truncate file from current position to end
+        except Exception as e:
+            print(f"Failed to modify {init_path}: {e}")
 
 setup(
             name = "Pattern",
@@ -149,5 +201,8 @@ setup(
         "cherrypy",
         "requests"
     ],
-    zip_safe = False
+    zip_safe = False,
+    cmdclass={
+        'install': PostInstall,
+    },
 )
